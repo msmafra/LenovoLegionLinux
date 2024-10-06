@@ -111,22 +111,25 @@ It allows you to control features like the fan curve, power mode, power limits, 
 
 **Other Lenovo Legion models from 2020 to 2023 probably also work. The following models were confirmed. If you have a model with a BIOS version with the same leading letters, e.g. EFCN (like EFCN54WW) then it will probably work. If you want to confirm that your model works or if it does not work, please raise a issue.**
 
-- Lenovo Legion 5 15IMH05, 15IMH05H (BIOS EFCN54WW): sensors, fan curve, power profile
-- Lenovo Legion 5 15ACH6H (BIOS GKCN58WW or GKCN57WW), Gen 6: sensors, fan curve, power profile
-- Lenovo Legion R9000 (R9000K2021H) (BIOS GKCN59WW): sensors, fan curve, power profile
-- Lenovo Legion 5 Pro 16ACH6H (82JQ) (BIOS GKCN58WW) x 2: sensors, fan curve, power profile
-- Legion 5 Pro 16ACH6H (AMD 5800H + Nvidia RTX 3070): sensors, fan curve, power profile
-- Lenovo Legion 5 15ARH05A (BIOS FSCN14WW), Gen 5: sensors, fan curve
-- Lenovo Legion 5 15ARH05H (BIOS FSCN14WW or FSCN26WW), Gen 5: sensors, fan curve, power profile
-- Lenovo Legion 5 15ITH6H (BIOS H1CN49WW, Intel): sensors, fan curve, power profile
-- Lenovo Legion 5 15ARH7H (BIOS JUCN55WW), Gen7: sensors, fan curve, power profile
-- Lenovo Legion 5 15ACH6 (BIOS HHCN31WW): sensors, fan curve, power profile
-- Lenovo Legion S7 16ARHA7 (BIOS KFCN32WW): sensors, fan curve (no minifancurve), power profile
-- Lenovo Legion 5 Pro 16ITH6 (BIOS H1CN52WW (there was an error in CPU temp with H1CN51WW)): sensors, fan curve, power profile
-- Lenovo Legion 5 15ACH6A (BIOS G9CN30WW), all AMD variant: sensors, fan curve (with mini fan curve), power profile
-- Lenovo Legion 5 17ACH6 (BIOS HHCN31WW): sensors, fan curve, power profile
-- Lenovo Legion 7i 16ITHG6 (BIOS H1CN35WW): sensors, fan curve, power profile
-- Lenovo Legion 7 Pro 16ARX8H (BIOS LPCN47WW): sensors, fan curve, power profile
+| Model Name | BIOS/UEFI Version/Gen | Features tested |
+|---|---|---|
+|Lenovo Legion 5 15IMH05, 15IMH05H |  BIOS EFCN54WW  | sensors, fan curve, power profile |
+|Lenovo Legion 5 15ACH6H |  BIOS GKCN58WW or GKCN57WW , Gen 6 | sensors, fan curve, power profile |
+|Lenovo Legion R9000 |  R9000K2021H   BIOS GKCN59WW  | sensors, fan curve, power profile |
+|Lenovo Legion 5 Pro 16ACH6H  82JQ  |  BIOS GKCN58WW  x 2 | sensors, fan curve, power profile |
+|Legion 5 Pro 16ACH6H  AMD 5800H + Nvidia RTX 3070 | --- | sensors, fan curve, power profile |
+|Lenovo Legion 5 15ARH05A |  BIOS FSCN14WW , Gen 5 | sensors, fan curve |
+|Lenovo Legion 5 15ARH05H |  BIOS FSCN14WW or FSCN26WW , Gen 5 | sensors, fan curve, power profile |
+|Lenovo Legion 5 15ITH6H |  BIOS H1CN49WW, Intel  | sensors, fan curve, power profile |
+|Lenovo Legion 5 15ARH7H |  BIOS JUCN55WW , Gen7 | sensors, fan curve, power profile |
+|Lenovo Legion 5 15ACH6 |  BIOS HHCN31WW  | sensors, fan curve, power profile |
+|Lenovo Legion S7 16ARHA7 |  BIOS KFCN32WW  | sensors, fan curve  no minifancurve , power profile |
+|Lenovo Legion 5 Pro 16ITH6 | BIOS H1CN52WW  <br /><sub>* there was an error in CPU temp with H1CN51WW</sub>   | sensors, fan curve, power profile |
+|Lenovo Legion 5 15ACH6A |  BIOS G9CN30WW , all AMD variant | sensors, fan curve  with mini fan curve , power profile |
+|Lenovo Legion 5 17ACH6 |  BIOS HHCN31WW  | sensors, fan curve, power profile |
+|Lenovo Legion 7i 16ITHG6 |  BIOS H1CN35WW  | sensors, fan curve, power profile |
+|Lenovo Legion 7 Pro 16ARX8H |  BIOS LPCN47WW  | sensors, fan curve, power profile |
+
 
 *Note:* Features that are not confirmed probably also work. They were just not tested.
 
