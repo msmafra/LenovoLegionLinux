@@ -31,6 +31,9 @@ void term_handler(int signum)
 
 void timer_handler()
 {
+	pretty("config reload start");
+	parseconf(&config);
+	pretty("config reload end");
 	pretty("set_all start");
 	set_all(get_powerstate(), &config);
 
@@ -102,12 +105,12 @@ int main()
 	inotify_fd = inotify_init();
 	inotify_add_watch(inotify_fd, profile_path, IN_MODIFY);
 	inotify_add_watch(inotify_fd, ac_path, IN_MODIFY);
-	
+
 	// listen
 	while (1) {
 		FD_ZERO(&readfds);
-        FD_SET(fd, &readfds);
-        FD_SET(inotify_fd, &readfds);
+		FD_SET(fd, &readfds);
+		FD_SET(inotify_fd, &readfds);
 
 		maxfd = (fd > inotify_fd) ? fd : inotify_fd;
 
@@ -128,7 +131,8 @@ int main()
 					set_timer(&its, delayed, 0, timerid);
 				} else if (ret[1] == '0') {
 					printf("reset timer\n");
-					set_timer(&its, delay_s, delay_ns, timerid);
+					set_timer(&its, delay_s, delay_ns,
+						  timerid);
 				} else {
 					printf("reset timer with delay\n");
 					int delay;
@@ -152,15 +156,13 @@ int main()
 
 		if (FD_ISSET(inotify_fd, &readfds)) {
 			int lengh = read(inotify_fd, buffer, BUF_LEN);
-			char* p = buffer;
-			while(p < buffer + lengh) {
-				event = (struct inotify_event*)p;
+			char *p = buffer;
+			while (p < buffer + lengh) {
+				event = (struct inotify_event *)p;
 				if (event->mask & IN_MODIFY) {
 					pretty("power-state/power-profile change");
-					pretty("config reload start");
-					parseconf(&config);
-					set_all(get_powerstate(), &config);
-					pretty("config reload end");
+					// as we used to use A3 in acpid cfg
+					set_timer(&its, 3, 0, timerid);
 				}
 				p += sizeof(struct inotify_event) + event->len;
 			}
