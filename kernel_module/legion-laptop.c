@@ -198,6 +198,32 @@ enum access_method {
 	ACCESS_METHOD_EC3 = 11, // loq
 };
 
+// acpi paths used by this driver
+enum acpi_paths_inventory_ids {
+	ACPI_PATH_STA = 0, // _STA
+	ACPI_PATH_CFG,     // _CFG
+	ACPI_PATH_READ_RAPIDCHARGE, // GBMD
+	ACPI_PATH_WRITE_RAPIDCHARGE,// SBMC
+	ACPI_PATH_READ_POWERMODE, // BTSM
+	ACPI_PATH_READ_FANSPEED1, // FANS
+	ACPI_PATH_READ_FANSPEED2, // FA2S
+	ACPI_PATH_READ_CPU_TEMP, // CPUT
+	ACPI_PATH_READ_GPU_TEMP, // GPUT
+	ACPI_PATH_MAX // not a PATH just the max nbr of this enum
+};
+
+static const char *default_acpi_paths[ACPI_PATH_MAX] = {
+	[ACPI_PATH_STA] = "_STA",
+	[ACPI_PATH_CFG] = "_CFG",
+	[ACPI_PATH_READ_RAPIDCHARGE] = "VPC0.GBMD",
+	[ACPI_PATH_WRITE_RAPIDCHARGE] = "VPC0.SBMC",
+	[ACPI_PATH_READ_POWERMODE] = "VPC0.BTSM",
+	[ACPI_PATH_READ_FANSPEED1] = "FANS",
+	[ACPI_PATH_READ_FANSPEED2] = "FA2S",
+	[ACPI_PATH_READ_CPU_TEMP] = "CPUT",
+	[ACPI_PATH_READ_GPU_TEMP] = "GPUT",
+};
+
 struct model_config {
 	const struct ec_register_offsets *registers;
 	bool check_embedded_controller_id;
@@ -210,6 +236,7 @@ struct model_config {
 	// TODO: maybe use bitfield
 	bool has_minifancurve;
 	bool has_custom_powermode;
+	bool has_extreme_powermode;
 	enum access_method access_method_powermode;
 
 	enum access_method access_method_keyboard;
@@ -223,6 +250,8 @@ struct model_config {
 
 	phys_addr_t ramio_physical_start;
 	size_t ramio_size;
+	const char *acpi_paths[ACPI_PATH_MAX];
+	bool has_fancurve_defaults;
 };
 
 /* =================================== */
@@ -371,26 +400,59 @@ static const struct ec_register_offsets ec_register_offsets_loq_v0 = {
 	.ECDEBUG = 0x2003,
 	.EXT_FAN_CUR_POINT = 0xC5a0,
 	.EXT_FAN_POINTS_SIZE = 0xC5a0, // constant 0
-	.EXT_FAN1_BASE = 0xC530,
-	.EXT_FAN2_BASE = 0xC530, // same rpm as cpu
+	.EXT_FAN1_BASE = 0xcf02, // cpu rpm fan base
+	.EXT_FAN2_BASE = 0xcf3e, // gpu rpm fan base
 	.EXT_FAN_ACC_BASE = 0xC5a0, // not found yet
 	.EXT_FAN_DEC_BASE = 0xC5a0, // not found yet
-	.EXT_CPU_TEMP = 0xC52F,
-	.EXT_CPU_TEMP_HYST = 0xC5a0, // not found yet
-	.EXT_GPU_TEMP = 0xC531,
-	.EXT_GPU_TEMP_HYST = 0xC5a0, // not found yet
-	.EXT_VRM_TEMP = 0xC5a0, // not found yet
-	.EXT_VRM_TEMP_HYST = 0xC5a0, // not found yet
-	.EXT_FAN1_RPM_LSB = 0xC5a0, // not found yet
+	.EXT_CPU_TEMP = 0xcf01, // cpu temp max base
+	.EXT_CPU_TEMP_HYST = 0xcf00, // cpu temp min base
+	.EXT_GPU_TEMP = 0xcf3d, // gpu temp max base
+	.EXT_GPU_TEMP_HYST = 0xcf3c, // gpu temp min base
+	.EXT_VRM_TEMP = 0xcf79, // IC max temp base
+	.EXT_VRM_TEMP_HYST = 0xcf78, // IC min temp base
+	.EXT_FAN1_RPM_LSB = 0xc509, // cpu fan base for reads
 	.EXT_FAN1_RPM_MSB = 0xC5a0, // not found yet
-	.EXT_FAN2_RPM_LSB = 0xC5a0, // not found yet
+	.EXT_FAN2_RPM_LSB = 0xc530, // gpu fan base for reads
 	.EXT_FAN2_RPM_MSB = 0xC5a0, // not found yet
 	.EXT_MINIFANCURVE_ON_COOL = 0xC5a0, // not found yet
 	.EXT_LOCKFANCONTROLLER = 0xC5a0, // not found yet
 	.EXT_CPU_TEMP_INPUT = 0xC5a0, // not found yet
 	.EXT_GPU_TEMP_INPUT = 0xC5a0, // not found yet
 	.EXT_IC_TEMP_INPUT = 0xC5a0, // not found yet
-	.EXT_POWERMODE = 0xc41D,
+	.EXT_POWERMODE = 0xc40a, // 3 bits from it
+	.EXT_FAN1_TARGET_RPM = 0xC5a0, // not found yet
+	.EXT_FAN2_TARGET_RPM = 0xC5a0, // not found yet
+	.EXT_MAXIMUMFANSPEED = 0xC5a0, // not found yet
+	.EXT_WHITE_KEYBOARD_BACKLIGHT = 0xC5a0 // not found yet
+};
+
+static const struct ec_register_offsets ec_register_offsets_loq_v1 = {
+	.ECHIPID1 = 0x2000,
+	.ECHIPID2 = 0x2001,
+	.ECHIPVER = 0x2002,
+	.ECDEBUG = 0x2003,
+	.EXT_FAN_CUR_POINT = 0xC5a0,
+	.EXT_FAN_POINTS_SIZE = 0xC5a0, // constant 0
+	.EXT_FAN1_BASE = 0xcf02, // cpu rpm fan base
+	.EXT_FAN2_BASE = 0xcf3e, // gpu rpm fan base
+	.EXT_FAN_ACC_BASE = 0xC5a0, // not found yet
+	.EXT_FAN_DEC_BASE = 0xC5a0, // not found yet
+	.EXT_CPU_TEMP = 0xcf01, // cpu temp max base
+	.EXT_CPU_TEMP_HYST = 0xcf00, // cpu temp min base
+	.EXT_GPU_TEMP = 0xcf3d, // gpu temp max base
+	.EXT_GPU_TEMP_HYST = 0xcf3c, // gpu temp min base
+	.EXT_VRM_TEMP = 0xcf79, // ic max temp base
+	.EXT_VRM_TEMP_HYST = 0xcf78, // ic min temp base
+	.EXT_FAN1_RPM_LSB = 0xc509, // cpu fan base for reads
+	.EXT_FAN1_RPM_MSB = 0xC5a0, // not found yet
+	.EXT_FAN2_RPM_LSB = 0xc53c, // gpu fan base for reads
+	.EXT_FAN2_RPM_MSB = 0xC5a0, // not found yet
+	.EXT_MINIFANCURVE_ON_COOL = 0xC5a0, // not found yet
+	.EXT_LOCKFANCONTROLLER = 0xC5a0, // not found yet
+	.EXT_CPU_TEMP_INPUT = 0xC5a0, // not found yet
+	.EXT_GPU_TEMP_INPUT = 0xC5a0, // not found yet
+	.EXT_IC_TEMP_INPUT = 0xC5a0, // not found yet
+	.EXT_POWERMODE = 0xc40a, // 3 bits from it
 	.EXT_FAN1_TARGET_RPM = 0xC5a0, // not found yet
 	.EXT_FAN2_TARGET_RPM = 0xC5a0, // not found yet
 	.EXT_MAXIMUMFANSPEED = 0xC5a0, // not found yet
@@ -413,7 +475,11 @@ static const struct model_config model_v0 = {
 	.access_method_fanfullspeed = ACCESS_METHOD_WMI,
 	.acpi_check_dev = true,
 	.ramio_physical_start = 0xFE00D400,
-	.ramio_size = 0x600
+	.ramio_size = 0x600,
+	.acpi_paths = {
+		[ACPI_PATH_READ_RAPIDCHARGE] = "\\_SB.PCI0.LPC0.EC0.VPC0.GBMD",
+		[ACPI_PATH_WRITE_RAPIDCHARGE] = "\\_SB.PCI0.LPC0.EC0.VPC0.SBMC"
+	}
 };
 
 static const struct model_config model_j2cn = {
@@ -955,6 +1021,7 @@ static const struct model_config model_lzcn = {
 	.memoryio_size = 0x300,
 	.has_minifancurve = true,
 	.has_custom_powermode = true,
+	.has_extreme_powermode = true,
 	.access_method_powermode = ACCESS_METHOD_WMI,
 	.access_method_keyboard = ACCESS_METHOD_WMI2,
 	.access_method_fanspeed = ACCESS_METHOD_WMI3,
@@ -962,8 +1029,13 @@ static const struct model_config model_lzcn = {
 	.access_method_fancurve = ACCESS_METHOD_EC3,
 	.access_method_fanfullspeed = ACCESS_METHOD_WMI3,
 	.acpi_check_dev = false,
-	.ramio_physical_start = 0xFE0B0400,
-	.ramio_size = 0x600
+	.ramio_physical_start = 0xFE0B0F00,
+	.ramio_size = 0x600,
+	.acpi_paths = {
+		[ACPI_PATH_STA] = "\\_SB.PC00.LPCB.EC0.VPC0._STA",
+		[ACPI_PATH_CFG] = "\\_SB.PC00.LPCB.EC0.VPC0._CFG"
+	},
+	.has_fancurve_defaults = true
 };
 
 // LOQ Model 2024
@@ -975,6 +1047,7 @@ static const struct model_config model_necn = {
 	.memoryio_size = 0x300,
 	.has_minifancurve = true,
 	.has_custom_powermode = true,
+	.has_extreme_powermode = true,
 	.access_method_powermode = ACCESS_METHOD_WMI,
 	.access_method_keyboard = ACCESS_METHOD_WMI2,
 	.access_method_fanspeed = ACCESS_METHOD_WMI3,
@@ -982,8 +1055,80 @@ static const struct model_config model_necn = {
 	.access_method_fancurve = ACCESS_METHOD_EC3,
 	.access_method_fanfullspeed = ACCESS_METHOD_WMI3,
 	.acpi_check_dev = false,
+	.ramio_physical_start = 0xFE0B0F00,
+	.ramio_size = 0x600
+};
+
+// LOQ 15AHP9
+static const struct model_config model_nzcn = {
+	.registers = &ec_register_offsets_loq_v0,
+	.check_embedded_controller_id = true,
+	.embedded_controller_id = 0x8227,
+	.memoryio_physical_ec_start = 0xC400,
+	.memoryio_size = 0x300,
+	.has_minifancurve = true,
+	.has_custom_powermode = true,
+	.has_extreme_powermode = true,
+	.access_method_powermode = ACCESS_METHOD_WMI,
+	.access_method_keyboard = ACCESS_METHOD_WMI2,
+	.access_method_fanspeed = ACCESS_METHOD_WMI3,
+	.access_method_temperature = ACCESS_METHOD_WMI3,
+	.access_method_fancurve = ACCESS_METHOD_EC3,
+	.access_method_fanfullspeed = ACCESS_METHOD_WMI3,
+	.acpi_check_dev = false,
+	.ramio_physical_start = 0xFE0B0F00,
+	.ramio_size = 0x600,
+	.acpi_paths = {
+		[ACPI_PATH_STA] = "\\_SB.PC00.LPCB.EC0.VPC0._STA",
+		[ACPI_PATH_CFG] = "\\_SB.PC00.LPCB.EC0.VPC0._CFG"
+	},
+	.has_fancurve_defaults = true
+};
+
+// Legion Slim 5 16AHP9 (2024) - Model 83DH
+static const struct model_config model_nrcn = {
+	.registers = &ec_register_offsets_v0,
+	.check_embedded_controller_id = true,
+	.embedded_controller_id = 0x8227,
+	.memoryio_physical_ec_start = 0xC400,
+	.memoryio_size = 0x300,
+	.has_minifancurve = true,
+	.has_custom_powermode = true,
+	.has_extreme_powermode = true,
+	.access_method_powermode = ACCESS_METHOD_WMI,
+	.access_method_keyboard = ACCESS_METHOD_WMI,
+	.access_method_fanspeed = ACCESS_METHOD_WMI3,
+	.access_method_temperature = ACCESS_METHOD_WMI3,
+	.access_method_fancurve = ACCESS_METHOD_WMI3,
+	.access_method_fanfullspeed = ACCESS_METHOD_WMI,
+	.acpi_check_dev = false,
 	.ramio_physical_start = 0xFE0B0400,
 	.ramio_size = 0x600
+};
+
+static const struct model_config model_r3cn = {
+	.registers = &ec_register_offsets_loq_v1,
+	.check_embedded_controller_id = true,
+	.embedded_controller_id = 0x5508,
+	.memoryio_physical_ec_start = 0xC400,
+	.memoryio_size = 0x300,
+	.has_minifancurve = true,
+	.has_custom_powermode = true,
+	.has_extreme_powermode = true,
+	.access_method_powermode = ACCESS_METHOD_WMI,
+	.access_method_keyboard = ACCESS_METHOD_WMI2,
+	.access_method_fanspeed = ACCESS_METHOD_WMI3,
+	.access_method_temperature = ACCESS_METHOD_WMI3,
+	.access_method_fancurve = ACCESS_METHOD_EC3,
+	.access_method_fanfullspeed = ACCESS_METHOD_WMI3,
+	.acpi_check_dev = false,
+	.ramio_physical_start = 0xFE0B0F00,
+	.ramio_size = 0x600,
+	.acpi_paths = {
+		[ACPI_PATH_STA] = "\\_SB.PC00.LPCB.EC0.VPC0._STA",
+		[ACPI_PATH_CFG] = "\\_SB.PC00.LPCB.EC0.VPC0._CFG"
+	},
+	.has_fancurve_defaults = true
 };
 
 static const struct dmi_system_id denylist[] = { {} };
@@ -1352,19 +1497,78 @@ static const struct dmi_system_id optimistic_allowlist[] = {
 		},
 		.driver_data = (void *)&model_necn
 	},
+	{
+		// e.g. LOQ 15AHP9 (AMD Ryzen 7 8845HS + RTX 4060)
+		.ident = "NZCN",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+			DMI_MATCH(DMI_BIOS_VERSION, "NZCN"),
+		},
+		.driver_data = (void *)&model_nzcn
+	},
+	{
+		// e.g. Legion Pro 5 16IRX9 (83DF)
+		.ident = "N0CN",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+			DMI_MATCH(DMI_BIOS_VERSION, "N0CN"),
+		},
+		.driver_data = (void *)&model_g8cn
+	},
+	{
+		// e.g. Legion Slim 5 16AHP9 (2024) - Model 83DH
+		// AMD Ryzen 7 8845HS with RTX 4060/4070
+		.ident = "NRCN",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+			DMI_MATCH(DMI_BIOS_VERSION, "NRCN"),
+		},
+		.driver_data = (void *)&model_nrcn
+	},
+	{
+		// e.g. LOQ 15IRX10 (Intel 13450HX + RTX 5060)
+		.ident = "R3CN",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+			DMI_MATCH(DMI_BIOS_VERSION, "R3CN"),
+		},
+		.driver_data = (void *)&model_r3cn
+	},
 	{}
 };
 
 /* ================================= */
 /* ACPI and WMI access               */
 /* ================================= */
+//global,
+//wanted to use _priv->conf but involves
+//move all structs/defn from all the way down up
+static const struct model_config *_model;
+
+static const char *get_model_acpi_path(const struct model_config *model, enum acpi_paths_inventory_ids id)
+{
+	if (id < 0 || id >= ACPI_PATH_MAX)
+		return NULL;
+	if (model->acpi_paths[id] != NULL)
+		return model->acpi_paths[id];
+	return default_acpi_paths[id];
+}
 
 // function from ideapad-laptop.c
-static int eval_int(acpi_handle handle, const char *name, unsigned long *res)
+static int eval_int(struct acpi_device *adev, const char *name, unsigned long *res)
 {
 	unsigned long long result;
 	acpi_status status;
-
+	acpi_handle handle;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+	status = acpi_get_handle(NULL, (char *)name, &handle);
+	if (ACPI_FAILURE(status))
+		return -EIO;
+#else
+	if (!adev)
+		return -ENODEV;
+	handle = adev->handle;
+#endif
 	status = acpi_evaluate_integer(handle, (char *)name, NULL, &result);
 	if (ACPI_FAILURE(status))
 		return -EIO;
@@ -1375,20 +1579,34 @@ static int eval_int(acpi_handle handle, const char *name, unsigned long *res)
 }
 
 // function from ideapad-laptop.c
-static int exec_simple_method(acpi_handle handle, const char *name,
+static int exec_simple_method(struct acpi_device *adev, const char *name,
 			      unsigned long arg)
 {
-	acpi_status status =
+	acpi_handle handle;
+	acpi_status status;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+	status = acpi_get_handle(NULL, (char *)name, &handle);
+	if (ACPI_FAILURE(status))
+		return -EIO;
+#else
+	if (!adev)
+		return -ENODEV;
+	handle = adev->handle;
+#endif
+	status =
 		acpi_execute_simple_method(handle, (char *)name, arg);
 
 	return ACPI_FAILURE(status) ? -EIO : 0;
 }
 
 // function from ideapad-laptop.c
-static int exec_sbmc(acpi_handle handle, unsigned long arg)
+static int exec_sbmc(struct acpi_device *adev, unsigned long arg)
 {
 	// \_SB.PCI0.LPC0.EC0.VPC0.SBMC
-	return exec_simple_method(handle, "VPC0.SBMC", arg);
+	const char *acpi_path;
+
+	acpi_path = get_model_acpi_path(_model, ACPI_PATH_WRITE_RAPIDCHARGE);
+	return exec_simple_method(adev, acpi_path, arg);
 }
 
 //static int eval_qcho(acpi_handle handle, unsigned long *res)
@@ -1397,15 +1615,21 @@ static int exec_sbmc(acpi_handle handle, unsigned long arg)
 //	return eval_int(handle, "QCHO", res);
 //}
 
-static int eval_gbmd(acpi_handle handle, unsigned long *res)
+static int eval_gbmd(struct acpi_device *adev, unsigned long *res)
 {
-	return eval_int(handle, "VPC0.GBMD", res);
+	const char *acpi_path;
+
+	acpi_path = get_model_acpi_path(_model, ACPI_PATH_READ_RAPIDCHARGE);
+	return eval_int(adev, acpi_path, res);
 }
 
-static int eval_spmo(acpi_handle handle, unsigned long *res)
+static int eval_spmo(struct acpi_device *adev, unsigned long *res)
 {
 	// \_SB.PCI0.LPC0.EC0.QCHO
-	return eval_int(handle, "VPC0.BTSM", res);
+	const char *acpi_path;
+
+	acpi_path = get_model_acpi_path(_model, ACPI_PATH_READ_POWERMODE);
+	return eval_int(adev, acpi_path, res);
 }
 
 static int acpi_process_buffer_to_ints(const char *id_name, int id_nr,
@@ -1719,6 +1943,7 @@ enum OtherMethodFeature {
 
 	OtherMethodFeature_FAN_SPEED_1 = 0x04030001,
 	OtherMethodFeature_FAN_SPEED_2 = 0x04030002,
+	OtherMethodFeature_FAN_FULLSPEED = 0x04020000,
 
 	OtherMethodFeature_C_U1 = 0x05010000,
 	OtherMethodFeature_TEMP_CPU = 0x05040000,
@@ -1739,6 +1964,37 @@ static ssize_t wmi_other_method_get_value(enum OtherMethodFeature feature_id,
 			     WMI_METHOD_ID_GET_FEATURE_VALUE, &params, &res);
 	if (!error)
 		*value = res;
+	return error;
+}
+
+static ssize_t wmi_other_method_set_value(enum OtherMethodFeature feature_id, int value, int *output)
+{
+	struct acpi_buffer params;
+	int error;
+	unsigned long val;
+	unsigned long res;
+  // WMI Call 0x12 (18) struct:
+	//
+	// CreateWordField (Arg2, Zero, TYP1)
+	// CreateByteField (Arg2, 0x02, FEA1)
+	// CreateByteField (Arg2, 0x03, DEV1)
+	// CreateDWordField (Arg2, 0x04, DAT1)
+	//
+	//OtherMethodFeature_FAN_FULLSPEED = 0x04020000,
+	// TYP0 = 0x0000
+	// FEA0 = 0x02
+	// DEV0 = 0x04
+	// DAT1 = 0xXXXXXXXX = parameter to add
+	// val = OtherMethodXX + Param = 0x4020000 | (DAT1 << 32)
+	val = (unsigned long)feature_id | ((unsigned long)(u32)value << 32);
+	params.length = sizeof(val);
+	params.pointer = &val;
+	error = wmi_exec_int(LEGION_WMI_LENOVO_OTHER_METHOD_GUID, 0,
+					WMI_METHOD_ID_SET_FEATURE_VALUE, &params, &res);
+	if (error)
+		pr_info("Error calling WMI Other Method Set Value: %d\n", error);
+	else
+		*output = res;
 	return error;
 }
 
@@ -2158,7 +2414,7 @@ static bool fancurve_set_speed_pwm(struct fancurve *fancurve, int point_id,
 {
 	u8 *speed;
 
-	if (!(point_id == 0 ? value == 0 : (value >= 0 && value <= 255))) {
+	if (!(value >= 0 && value <= 255)) {
 		pr_err("Value %d PWM not in allowed range to point with id %d",
 		       value, point_id);
 		return false;
@@ -2179,7 +2435,7 @@ static bool fancurve_set_speed_pwm(struct fancurve *fancurve, int point_id,
 		*speed = clamp_t(u8, value, 0, 255);
 		return true;
 	case FAN_SPEED_UNIT_RPM_HUNDRED:
-		*speed = clamp_t(u8, value * MAX_RPM / 100 / 255, 0, 255);
+		*speed = clamp_t(u8, (value * MAX_RPM + (100 * 255) - 1) / (100 * 255), 0, 255);
 		return true;
 	default:
 		pr_info("No method to set for fan_speed_unit %d.",
@@ -2355,7 +2611,7 @@ static ssize_t fancurve_print_seqfile(const struct fancurve *fancurve,
 		const struct fancurve_point *point = &fancurve->points[i];
 
 		fancurve_get_speed_pwm(fancurve, i, 0, &speed_pwm1);
-		fancurve_get_speed_pwm(fancurve, i, 0, &speed_pwm2);
+		fancurve_get_speed_pwm(fancurve, i, 1, &speed_pwm2);
 
 		seq_printf(
 			s,
@@ -2424,6 +2680,9 @@ struct legion_private {
 	// TODO: remove, only for reverse enginnering
 	struct ecram_memoryio ec_memoryio;
 };
+
+// keep state of fancurve defaults powermode
+static int fancurve_defaults_powermode;
 
 // shared between different drivers: WMI, platform and protected by mutex
 static struct legion_private *legion_shared;
@@ -2608,9 +2867,9 @@ static ssize_t ec_read_fanspeed(struct ecram *ecram,
 }
 
 // '\_SB.PCI0.LPC0.EC0.FANS
-#define ACPI_PATH_FAN_SPEED1 "FANS"
+// #define ACPI_PATH_FAN_SPEED1 "FANS"
 // '\_SB.PCI0.LPC0.EC0.FA2S
-#define ACPI_PATH_FAN_SPEED2 "FA2S"
+// #define ACPI_PATH_FAN_SPEED2 "FA2S"
 
 static ssize_t acpi_read_fanspeed(struct legion_private *priv, int fan_id,
 				  int *value)
@@ -2620,23 +2879,23 @@ static ssize_t acpi_read_fanspeed(struct legion_private *priv, int fan_id,
 	const char *acpi_path;
 
 	if (fan_id == 0) {
-		acpi_path = ACPI_PATH_FAN_SPEED1;
+		acpi_path = get_model_acpi_path(_model, ACPI_PATH_READ_FANSPEED1);
 	} else if (fan_id == 1) {
-		acpi_path = ACPI_PATH_FAN_SPEED2;
+		acpi_path = get_model_acpi_path(_model, ACPI_PATH_READ_FANSPEED2);
 	} else {
 		// TODO: use all correct error codes
 		return -EEXIST;
 	}
-	err = eval_int(priv->adev->handle, acpi_path, &acpi_value);
+	err = eval_int(priv->adev, acpi_path, &acpi_value);
 	if (!err)
 		*value = (int)acpi_value * 100;
 	return err;
 }
 
 // '\_SB.PCI0.LPC0.EC0.CPUT
-#define ACPI_PATH_CPU_TEMP "CPUT"
+// #define ACPI_PATH_CPU_TEMP "CPUT"
 // '\_SB.PCI0.LPC0.EC0.GPUT
-#define ACPI_PATH_GPU_TEMP "GPUT"
+// #define ACPI_PATH_GPU_TEMP "GPUT"
 
 static ssize_t acpi_read_temperature(struct legion_private *priv, int fan_id,
 				     int *value)
@@ -2646,14 +2905,14 @@ static ssize_t acpi_read_temperature(struct legion_private *priv, int fan_id,
 	const char *acpi_path;
 
 	if (fan_id == 0) {
-		acpi_path = ACPI_PATH_CPU_TEMP;
+		acpi_path = get_model_acpi_path(_model, ACPI_PATH_READ_CPU_TEMP);
 	} else if (fan_id == 1) {
-		acpi_path = ACPI_PATH_GPU_TEMP;
+		acpi_path = get_model_acpi_path(_model, ACPI_PATH_READ_GPU_TEMP);
 	} else {
 		// TODO: use all correct error codes
 		return -EEXIST;
 	}
-	err = eval_int(priv->adev->handle, acpi_path, &acpi_value);
+	err = eval_int(priv->adev, acpi_path, &acpi_value);
 	if (!err)
 		*value = (int)acpi_value;
 	return err;
@@ -2959,6 +3218,46 @@ static ssize_t wmi_write_fancurve_custom(const struct model_config *model,
 	return err;
 }
 
+static ssize_t wmi_write_fancurve_defaults(struct legion_private *priv, int value)
+{
+	int err = -1;
+	struct {
+		u8 F000; /* Thermal Mode/Powermode */
+		u8 notused0[5]; /* F001 - F002 */
+		u16 F003; /* Index Point 1 */
+		u16 F004; /* 2 */
+		u16 F005; /* 3 */
+		u16 F006; /* 4 */
+		u16 F007; /* 5 */
+		u16 F008; /* 6 */
+		u16 F009; /* 7 */
+		u16 F00A; /* 8 */
+		u16 F00B; /* 9 */
+		u16 F00C; /* Index Point 10 */
+		u8 notused1[26]; /* F00D - F019 */
+} __packed fan_table = { 0 };
+
+	if (!priv->conf->has_fancurve_defaults) {
+		pr_info("fancurve_defaults_powermode not supported for your model\n");
+		return err;
+	};
+	fan_table.F000 = value;
+	fan_table.F003 = 0x01;
+	fan_table.F004 = 0x02;
+	fan_table.F005 = 0x03;
+	fan_table.F006 = 0x04;
+	fan_table.F007 = 0x05;
+	fan_table.F008 = 0x06;
+	fan_table.F009 = 0x07;
+	fan_table.F00A = 0x08;
+	fan_table.F00B = 0x09;
+	fan_table.F00C = 0x0A;
+
+	err = wmi_exec_arg(WMI_GUID_LENOVO_FAN_METHOD, 0,
+						WMI_METHOD_ID_FAN_SET_TABLE, (u8 *)&fan_table, sizeof(fan_table));
+	return err;
+}
+
 /* Read the fan curve from the EC.
  *
  * In newer models (>=2022) there is an ACPI/WMI to read fan curve as
@@ -3187,31 +3486,40 @@ static int ec_read_fancurve_loq(struct ecram *ecram,
 				struct fancurve *fancurve)
 {
 	size_t i = 0;
-	size_t struct_offset = 3; // {cpu_temp: u8, rpm: u8, gpu_temp?: u8}
+	size_t struct_offset_ecram = 3;
+	size_t struct_offset_ecramsys = 6;
 
 	fancurve->fan_speed_unit = FAN_SPEED_UNIT_RPM_HUNDRED;
 	for (i = 0; i < FANCURVESIZE_LOQ; ++i) {
 		struct fancurve_point *point = &fancurve->points[i];
 
 		point->speed1 =
-			ecram_read(ecram, model->registers->EXT_FAN1_BASE +
-						  (i * struct_offset));
+			ecram_read(ecram, model->registers->EXT_FAN1_RPM_LSB +
+						  (i * struct_offset_ecram));
 		point->speed2 =
-			ecram_read(ecram, model->registers->EXT_FAN2_BASE +
-						  (i * struct_offset));
+			ecram_read(ecram, model->registers->EXT_FAN2_RPM_LSB +
+						  (i * struct_offset_ecram));
 
 		point->accel = 0;
 		point->decel = 0;
 		point->cpu_max_temp_celsius =
-			ecram_read(ecram, model->registers->EXT_CPU_TEMP +
-						  (i * struct_offset));
+			ecram_read(ecram, model->registers->EXT_FAN1_RPM_LSB +
+						  (i * struct_offset_ecram) - 1);
+		point->cpu_min_temp_celsius =
+			ecram_read(ecram, model->registers->EXT_FAN1_RPM_LSB +
+						  (i * struct_offset_ecram) - 2);
 		point->gpu_max_temp_celsius =
-			ecram_read(ecram, model->registers->EXT_GPU_TEMP +
-						  (i * struct_offset));
-		point->cpu_min_temp_celsius = 0;
-		point->gpu_min_temp_celsius = 0;
-		point->ic_max_temp_celsius = 0;
-		point->ic_min_temp_celsius = 0;
+			ecram_read(ecram, model->registers->EXT_FAN2_RPM_LSB +
+						  (i * struct_offset_ecram) - 1);
+		point->gpu_min_temp_celsius =
+			ecram_read(ecram, model->registers->EXT_FAN2_RPM_LSB +
+						  (i * struct_offset_ecram) - 2);
+		point->ic_max_temp_celsius =
+			ecram_read(ecram, model->registers->EXT_VRM_TEMP +
+						  (i * struct_offset_ecramsys));
+		point->ic_min_temp_celsius =
+			ecram_read(ecram, model->registers->EXT_VRM_TEMP_HYST +
+						  (i * struct_offset_ecramsys));
 	}
 
 	fancurve->size = FANCURVESIZE_LOQ;
@@ -3222,6 +3530,8 @@ static int ec_read_fancurve_loq(struct ecram *ecram,
 	return 0;
 }
 
+#define LOQ_CMDR_ADDR 0xcfb6
+
 static int ec_write_fancurve_loq(struct ecram *ecram,
 				 const struct model_config *model,
 				 const struct fancurve *fancurve)
@@ -3229,39 +3539,45 @@ static int ec_write_fancurve_loq(struct ecram *ecram,
 	size_t i;
 	int valr1;
 	int valr2;
-	size_t struct_offset = 3; // {cpu_temp: u8, rpm: u8, gpu_temp?: u8}
+	u8 cmrd;
+	size_t struct_offset_ecramsys = 6;
 
 	for (i = 0; i < FANCURVESIZE_LOQ; ++i) {
 		const struct fancurve_point *point = &fancurve->points[i];
 
-		ecram_write(ecram,
-			    model->registers->EXT_FAN1_BASE +
-				    (i * struct_offset),
-			    point->speed1);
-		valr1 = ecram_read(ecram, model->registers->EXT_FAN1_BASE +
-						  (i * struct_offset));
-		ecram_write(ecram,
-			    model->registers->EXT_FAN2_BASE +
-				    (i * struct_offset),
-			    point->speed2);
+		ecram_write(ecram, model->registers->EXT_FAN1_BASE
+							+ (i * struct_offset_ecramsys), point->speed1);
+		valr1 = ecram_read(ecram, model->registers->EXT_FAN1_BASE
+							+ (i * struct_offset_ecramsys));
+
+		ecram_write(ecram, model->registers->EXT_FAN2_BASE
+							+ (i * struct_offset_ecramsys), point->speed2);
 		valr2 = ecram_read(ecram, model->registers->EXT_FAN2_BASE +
-						  (i * struct_offset));
+						  (i * struct_offset_ecramsys));
+
 		pr_info("Writing fan1: %d; reading fan1: %d\n", point->speed1,
 			valr1);
 		pr_info("Writing fan2: %d; reading fan2: %d\n", point->speed2,
 			valr2);
 
-		// write to memory and repeat 8 bytes later again
-		ecram_write(ecram,
-			    model->registers->EXT_CPU_TEMP +
-				    (i * struct_offset),
-			    point->cpu_max_temp_celsius);
-		// write to memory and repeat 8 bytes later again
-		ecram_write(ecram,
-			    model->registers->EXT_GPU_TEMP +
-				    (i * struct_offset),
-			    point->gpu_max_temp_celsius);
+		ecram_write(ecram, model->registers->EXT_CPU_TEMP
+							+ (i * struct_offset_ecramsys), point->cpu_max_temp_celsius);
+		ecram_write(ecram, model->registers->EXT_CPU_TEMP_HYST
+							+ (i * struct_offset_ecramsys), point->cpu_min_temp_celsius);
+		ecram_write(ecram, model->registers->EXT_GPU_TEMP
+							+ (i * struct_offset_ecramsys), point->gpu_max_temp_celsius);
+		ecram_write(ecram, model->registers->EXT_GPU_TEMP_HYST
+							+ (i * struct_offset_ecramsys), point->gpu_min_temp_celsius);
+		ecram_write(ecram, model->registers->EXT_VRM_TEMP
+							+ (i * struct_offset_ecramsys), point->ic_max_temp_celsius);
+		ecram_write(ecram, model->registers->EXT_VRM_TEMP_HYST
+							+ (i * struct_offset_ecramsys), point->ic_min_temp_celsius);
+
 	}
+	// execute
+	cmrd = ecram_read(ecram, LOQ_CMDR_ADDR);
+	cmrd |= (1 << 4);
+	ecram_write(ecram, LOQ_CMDR_ADDR, cmrd);
 
 	return 0;
 }
@@ -3426,6 +3742,25 @@ static ssize_t wmi_write_fanfullspeed(struct legion_private *priv, bool state)
 					1, state);
 }
 
+static int wmi_read_fanfullspeed_other(struct legion_private *priv, bool *state)
+{
+	int err;
+	int res;
+
+	err = wmi_other_method_get_value(OtherMethodFeature_FAN_FULLSPEED, &res);
+	if (!err)
+		*state = (res != 0); // ON
+	return err;
+}
+
+static int wmi_write_fanfullspeed_other(struct legion_private *priv, bool state)
+{
+	int res;
+	int value = (state)?1:0;
+
+	return wmi_other_method_set_value(OtherMethodFeature_FAN_FULLSPEED, value, &res);
+}
+
 static ssize_t read_fanfullspeed(struct legion_private *priv, bool *state)
 {
 	// TODO: use enums or function pointers?
@@ -3434,6 +3769,8 @@ static ssize_t read_fanfullspeed(struct legion_private *priv, bool *state)
 		return ec_read_fanfullspeed(&priv->ecram, priv->conf, state);
 	case ACCESS_METHOD_WMI:
 		return wmi_read_fanfullspeed(priv, state);
+	case ACCESS_METHOD_WMI3:
+		return wmi_read_fanfullspeed_other(priv, state);
 	default:
 		pr_info("No access method for fan full speed: %d\n",
 			priv->conf->access_method_fanfullspeed);
@@ -3451,6 +3788,8 @@ static ssize_t write_fanfullspeed(struct legion_private *priv, bool state)
 		return res;
 	case ACCESS_METHOD_WMI:
 		return wmi_write_fanfullspeed(priv, state);
+	case ACCESS_METHOD_WMI3:
+		return wmi_write_fanfullspeed_other(priv, state);
 	default:
 		pr_info("No access method for fan full speed: %d\n",
 			priv->conf->access_method_fanfullspeed);
@@ -3466,27 +3805,31 @@ enum legion_ec_powermode {
 	LEGION_EC_POWERMODE_QUIET = 2,
 	LEGION_EC_POWERMODE_BALANCED = 0,
 	LEGION_EC_POWERMODE_PERFORMANCE = 1,
-	LEGION_EC_POWERMODE_CUSTOM = 3
+	LEGION_EC_POWERMODE_CUSTOM = 3,
+	LEGION_EC_POWERMODE_EXTREME = 7 // based on GZ44
 };
 
 enum legion_wmi_powermode {
-	LEGION_WMI_POWERMODE_QUIET = 1,
+	LEGION_WMI_POWERMODE_LOW_POWER = 1,
 	LEGION_WMI_POWERMODE_BALANCED = 2,
 	LEGION_WMI_POWERMODE_PERFORMANCE = 3,
-	LEGION_WMI_POWERMODE_CUSTOM = 255
+	LEGION_WMI_POWERMODE_CUSTOM = 255,
+	LEGION_WMI_POWERMODE_MAX_POWER = 224
 };
 
 static enum legion_wmi_powermode ec_to_wmi_powermode(int ec_mode)
 {
 	switch (ec_mode) {
 	case LEGION_EC_POWERMODE_QUIET:
-		return LEGION_WMI_POWERMODE_QUIET;
+		return LEGION_WMI_POWERMODE_LOW_POWER;
 	case LEGION_EC_POWERMODE_BALANCED:
 		return LEGION_WMI_POWERMODE_BALANCED;
 	case LEGION_EC_POWERMODE_PERFORMANCE:
 		return LEGION_WMI_POWERMODE_PERFORMANCE;
 	case LEGION_EC_POWERMODE_CUSTOM:
 		return LEGION_WMI_POWERMODE_CUSTOM;
+	case LEGION_EC_POWERMODE_EXTREME:
+		return LEGION_WMI_POWERMODE_MAX_POWER;
 	default:
 		return LEGION_WMI_POWERMODE_BALANCED;
 	}
@@ -3496,7 +3839,7 @@ static enum legion_ec_powermode
 wmi_to_ec_powermode(enum legion_wmi_powermode wmi_mode)
 {
 	switch (wmi_mode) {
-	case LEGION_WMI_POWERMODE_QUIET:
+	case LEGION_WMI_POWERMODE_LOW_POWER:
 		return LEGION_EC_POWERMODE_QUIET;
 	case LEGION_WMI_POWERMODE_BALANCED:
 		return LEGION_EC_POWERMODE_BALANCED;
@@ -3504,6 +3847,8 @@ wmi_to_ec_powermode(enum legion_wmi_powermode wmi_mode)
 		return LEGION_EC_POWERMODE_PERFORMANCE;
 	case LEGION_WMI_POWERMODE_CUSTOM:
 		return LEGION_EC_POWERMODE_CUSTOM;
+	case LEGION_WMI_POWERMODE_MAX_POWER:
+		return LEGION_EC_POWERMODE_EXTREME;
 	default:
 		return LEGION_EC_POWERMODE_BALANCED;
 	}
@@ -3518,7 +3863,11 @@ static ssize_t ec_read_powermode(struct legion_private *priv, int *powermode)
 
 static ssize_t ec_write_powermode(struct legion_private *priv, u8 value)
 {
-	if (!((value >= 0 && value <= 2) || value == 255)) {
+	if (value != LEGION_EC_POWERMODE_BALANCED &&
+			value != LEGION_EC_POWERMODE_PERFORMANCE &&
+			value != LEGION_EC_POWERMODE_QUIET &&
+			value != LEGION_EC_POWERMODE_CUSTOM &&
+			value != LEGION_EC_POWERMODE_EXTREME) {
 		pr_info("Unexpected power mode value ignored: %d\n", value);
 		return -ENOMEM;
 	}
@@ -3533,7 +3882,7 @@ static ssize_t acpi_read_powermode(struct legion_private *priv, int *powermode)
 
 	// spmo method not always available
 	// \_SB.PCI0.LPC0.EC0.SPMO
-	err = eval_spmo(priv->adev->handle, &acpi_powermode);
+	err = eval_spmo(priv->adev, &acpi_powermode);
 	*powermode = (int)acpi_powermode;
 	return err;
 }
@@ -3553,9 +3902,11 @@ static ssize_t wmi_read_powermode(int *powermode)
 
 static ssize_t wmi_write_powermode(u8 value)
 {
-	if (!((value >= LEGION_WMI_POWERMODE_QUIET &&
-	       value <= LEGION_WMI_POWERMODE_PERFORMANCE) ||
-	      value == LEGION_WMI_POWERMODE_CUSTOM)) {
+	if (value != LEGION_WMI_POWERMODE_BALANCED &&
+		value != LEGION_WMI_POWERMODE_PERFORMANCE &&
+		value != LEGION_WMI_POWERMODE_LOW_POWER &&
+		value != LEGION_WMI_POWERMODE_CUSTOM &&
+		value != LEGION_WMI_POWERMODE_MAX_POWER) {
 		pr_info("Unexpected power mode value ignored: %d\n", value);
 		return -ENOMEM;
 	}
@@ -3645,7 +3996,7 @@ static int acpi_read_rapidcharge(struct acpi_device *adev, bool *state)
 	 * return 0;
 	 */
 
-	err = eval_gbmd(adev->handle, &result);
+	err = eval_gbmd(adev, &result);
 	if (err)
 		return err;
 
@@ -3659,7 +4010,7 @@ static int acpi_write_rapidcharge(struct acpi_device *adev, bool state)
 	unsigned long fct_nr = state > 0 ? FCT_RAPID_CHARGE_ON :
 					   FCT_RAPID_CHARGE_OFF;
 
-	err = exec_sbmc(adev->handle, fct_nr);
+	err = exec_sbmc(adev, fct_nr);
 	pr_info("Set rapidcharge to %d by calling %lu: result: %d\n", state,
 		fct_nr, err);
 	return err;
@@ -3839,7 +4190,10 @@ static int debugfs_fancurve_show(struct seq_file *s, void *unused)
 	seq_printf(s, "legion_laptop features: %s\n", LEGIONFEATURES);
 	seq_printf(s, "legion_laptop ec_readonly: %d\n", ec_readonly);
 
-	err = eval_int(priv->adev->handle, "VPC0._CFG", &cfg);
+	const char *acpi_path;
+
+	acpi_path = get_model_acpi_path(_model, ACPI_PATH_CFG);
+	err = eval_int(priv->adev, acpi_path, &cfg);
 	seq_printf(s, "ACPI CFG error: %d\n", err);
 	seq_printf(s, "ACPI CFG: %lu\n", cfg);
 
@@ -4902,8 +5256,10 @@ static void legion_platform_profile_notify(struct device *dev)
 static void legion_platform_profile_notify(void)
 #endif
 {
-	if (!enable_platformprofile)
+	if (!enable_platformprofile) {
 		pr_info("Skipping platform_profile_notify because enable_platformprofile is false\n");
+		return;
+	}
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
 	platform_profile_notify(dev);
@@ -4937,12 +5293,17 @@ static int legion_platform_profile_get(struct platform_profile_handler *pprof,
 	case LEGION_WMI_POWERMODE_PERFORMANCE:
 		*profile = PLATFORM_PROFILE_PERFORMANCE;
 		break;
-	case LEGION_WMI_POWERMODE_QUIET:
-		*profile = PLATFORM_PROFILE_QUIET;
+	case LEGION_WMI_POWERMODE_LOW_POWER:
+		*profile = PLATFORM_PROFILE_LOW_POWER;
 		break;
 	case LEGION_WMI_POWERMODE_CUSTOM:
-		*profile = PLATFORM_PROFILE_BALANCED_PERFORMANCE;
+		*profile = PLATFORM_PROFILE_CUSTOM;
 		break;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 19, 0)
+	case LEGION_WMI_POWERMODE_MAX_POWER:
+		*profile = PLATFORM_PROFILE_MAX_POWER;
+		break;
+#endif
 	default:
 		return -EINVAL;
 	}
@@ -4966,7 +5327,6 @@ static int legion_platform_profile_set(struct platform_profile_handler *pprof,
 	priv = container_of(pprof, struct legion_private,
 			    platform_profile_handler);
 #endif
-
 	switch (profile) {
 	case PLATFORM_PROFILE_BALANCED:
 		powermode = LEGION_WMI_POWERMODE_BALANCED;
@@ -4974,12 +5334,17 @@ static int legion_platform_profile_set(struct platform_profile_handler *pprof,
 	case PLATFORM_PROFILE_PERFORMANCE:
 		powermode = LEGION_WMI_POWERMODE_PERFORMANCE;
 		break;
-	case PLATFORM_PROFILE_QUIET:
-		powermode = LEGION_WMI_POWERMODE_QUIET;
+	case PLATFORM_PROFILE_LOW_POWER:
+		powermode = LEGION_WMI_POWERMODE_LOW_POWER;
 		break;
-	case PLATFORM_PROFILE_BALANCED_PERFORMANCE:
+	case PLATFORM_PROFILE_CUSTOM:
 		powermode = LEGION_WMI_POWERMODE_CUSTOM;
 		break;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 19, 0)
+	case PLATFORM_PROFILE_MAX_POWER:
+		powermode = LEGION_WMI_POWERMODE_MAX_POWER;
+		break;
+#endif
 	default:
 		return -EOPNOTSUPP;
 	}
@@ -4989,17 +5354,20 @@ static int legion_platform_profile_set(struct platform_profile_handler *pprof,
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
 static bool conf_has_custom_powermode;
+static bool conf_has_extreme_powermode;
 static enum access_method conf_access_method_powermode;
 
 static int legion_platform_profile_probe(void *drvdata, unsigned long *choices)
 {
-	set_bit(PLATFORM_PROFILE_QUIET, choices);
+	set_bit(PLATFORM_PROFILE_LOW_POWER, choices);
 	set_bit(PLATFORM_PROFILE_BALANCED, choices);
 	set_bit(PLATFORM_PROFILE_PERFORMANCE, choices);
-	if (conf_has_custom_powermode && conf_access_method_powermode == ACCESS_METHOD_WMI) {
-		set_bit(PLATFORM_PROFILE_BALANCED_PERFORMANCE, choices);
-	}
-
+	if (conf_has_custom_powermode && conf_access_method_powermode == ACCESS_METHOD_WMI)
+		set_bit(PLATFORM_PROFILE_CUSTOM, choices);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 19, 0)
+	if (conf_has_extreme_powermode && conf_access_method_powermode == ACCESS_METHOD_WMI)
+		set_bit(PLATFORM_PROFILE_MAX_POWER, choices);
+#endif
 	return 0;
 }
 
@@ -5024,6 +5392,7 @@ static int legion_platform_profile_init(struct legion_private *priv)
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
 	conf_has_custom_powermode = priv->conf->has_custom_powermode;
+	conf_has_extreme_powermode = priv->conf->has_extreme_powermode;
 	conf_access_method_powermode = priv->conf->access_method_powermode;
 #else
 	priv->platform_profile_handler.profile_get =
@@ -5031,14 +5400,19 @@ static int legion_platform_profile_init(struct legion_private *priv)
 	priv->platform_profile_handler.profile_set =
 		legion_platform_profile_set;
 
-	set_bit(PLATFORM_PROFILE_QUIET, priv->platform_profile_handler.choices);
+	set_bit(PLATFORM_PROFILE_LOW_POWER, priv->platform_profile_handler.choices);
 	set_bit(PLATFORM_PROFILE_BALANCED,
 		priv->platform_profile_handler.choices);
 	set_bit(PLATFORM_PROFILE_PERFORMANCE,
 		priv->platform_profile_handler.choices);
 	if (priv->conf->has_custom_powermode &&
 	    priv->conf->access_method_powermode == ACCESS_METHOD_WMI) {
-		set_bit(PLATFORM_PROFILE_BALANCED_PERFORMANCE,
+		set_bit(PLATFORM_PROFILE_CUSTOM,
+			priv->platform_profile_handler.choices);
+	}
+	if (priv->conf->has_extreme_powermode &&
+	    priv->conf->access_method_powermode == ACCESS_METHOD_WMI) {
+		set_bit(PLATFORM_PROFILE_MAX_POWER,
 			priv->platform_profile_handler.choices);
 	}
 #endif
@@ -5386,6 +5760,63 @@ error:
 	return count;
 }
 
+static ssize_t fancurve_defaults_powermode_store(struct device *dev,
+				  struct device_attribute *devattr,
+				  const char *buf, size_t count)
+{
+	int value;
+	int err;
+	struct legion_private *priv = dev_get_drvdata(dev);
+
+	err = kstrtoint(buf, 0, &value);
+	if (err) {
+		err = -1;
+		pr_info("Parsing fancurve_defaults_powermode store failed: error:%d\n", err);
+		goto error;
+	}
+
+	if (!(value == LEGION_WMI_POWERMODE_LOW_POWER ||
+	      value == LEGION_WMI_POWERMODE_PERFORMANCE ||
+	      value == LEGION_WMI_POWERMODE_BALANCED ||
+	      value == LEGION_WMI_POWERMODE_CUSTOM ||
+	      value == LEGION_WMI_POWERMODE_MAX_POWER)) {
+		err = -1;
+		pr_info("Parsing fancurve_defaults_powermode store failed invalid powermode id %d: error:%d\n", value, err);
+		goto error;
+	}
+
+	mutex_lock(&priv->fancurve_mutex);
+	err = wmi_write_fancurve_defaults(priv, value);
+	if (err) {
+		err = -1;
+		pr_info("Failed to write auto points defaults\n");
+		goto error_unlock;
+	}
+	fancurve_defaults_powermode = value;
+	mutex_unlock(&priv->fancurve_mutex);
+	return count;
+
+error_unlock:
+	mutex_unlock(&priv->fancurve_mutex);
+error:
+	return err;
+}
+
+static ssize_t fancurve_defaults_powermode_show(struct device *dev,
+				 struct device_attribute *devattr, char *buf)
+{
+	struct legion_private *priv = dev_get_drvdata(dev);
+	int power_mode;
+
+	mutex_lock(&priv->fancurve_mutex);
+	read_powermode(priv, &power_mode);
+	mutex_unlock(&priv->fancurve_mutex);
+	// set to 0 if not in CUSTOM mode (pressed Fn-Q)
+	if (power_mode != LEGION_WMI_POWERMODE_CUSTOM)
+		fancurve_defaults_powermode = 0;
+	return sprintf(buf, "%d\n", fancurve_defaults_powermode);
+}
+
 // pwm1
 static SENSOR_DEVICE_ATTR_RO(fan1_max, fan_max, 0);
 static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_point1_pwm, autopoint,
@@ -5600,6 +6031,7 @@ static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_point10_decel, autopoint,
 			       FANCURVE_ATTR_DECEL, 9);
 //size
 static SENSOR_DEVICE_ATTR_2_RW(auto_points_size, autopoint, FANCURVE_SIZE, 0);
+static SENSOR_DEVICE_ATTR_2_RW(fancurve_defaults_powermode, fancurve_defaults_powermode, 0, 0);
 
 static ssize_t minifancurve_show(struct device *dev,
 				 struct device_attribute *devattr, char *buf)
@@ -5655,65 +6087,6 @@ error:
 }
 
 static SENSOR_DEVICE_ATTR_RW(minifancurve, minifancurve, 0);
-
-static ssize_t pwm1_mode_show(struct device *dev,
-			      struct device_attribute *devattr, char *buf)
-{
-	bool value;
-	int err;
-	struct legion_private *priv = dev_get_drvdata(dev);
-
-	mutex_lock(&priv->fancurve_mutex);
-	err = ec_read_fanfullspeed(&priv->ecram, priv->conf, &value);
-	if (err) {
-		err = -1;
-		pr_info("Failed to pwm1_mode/maximumfanspeed\n");
-		goto error_unlock;
-	}
-	mutex_unlock(&priv->fancurve_mutex);
-	return sprintf(buf, "%d\n", value ? 0 : 2);
-
-error_unlock:
-	mutex_unlock(&priv->fancurve_mutex);
-	return -1;
-}
-
-// TODO: remove? or use WMI method?
-static ssize_t pwm1_mode_store(struct device *dev,
-			       struct device_attribute *devattr,
-			       const char *buf, size_t count)
-{
-	int value;
-	int is_maximumfanspeed;
-	int err;
-	struct legion_private *priv = dev_get_drvdata(dev);
-
-	err = kstrtoint(buf, 0, &value);
-	if (err) {
-		err = -1;
-		pr_info("Parsing hwmon store failed: error:%d\n", err);
-		goto error;
-	}
-	is_maximumfanspeed = value == 0;
-
-	mutex_lock(&priv->fancurve_mutex);
-	err = ec_write_fanfullspeed(&priv->ecram, priv->conf,
-				    is_maximumfanspeed);
-	if (err) {
-		err = -1;
-		pr_info("Failed to write pwm1_mode/maximumfanspeed\n");
-		goto error_unlock;
-	}
-	mutex_unlock(&priv->fancurve_mutex);
-	return count;
-
-error_unlock:
-	mutex_unlock(&priv->fancurve_mutex);
-error:
-	return err;
-}
-
-static SENSOR_DEVICE_ATTR_RW(pwm1_mode, pwm1_mode, 0);
 
 static struct attribute *fancurve_hwmon_attributes[] = {
 	&sensor_dev_attr_fan1_max.dev_attr.attr,
@@ -5821,7 +6194,8 @@ static struct attribute *fancurve_hwmon_attributes[] = {
 	//
 	&sensor_dev_attr_auto_points_size.dev_attr.attr,
 	&sensor_dev_attr_minifancurve.dev_attr.attr,
-	&sensor_dev_attr_pwm1_mode.dev_attr.attr, NULL
+	&sensor_dev_attr_fancurve_defaults_powermode.dev_attr.attr,
+	NULL
 };
 
 static umode_t legion_hwmon_is_visible(struct kobject *kobj,
@@ -5892,22 +6266,23 @@ static int acpi_init(struct legion_private *priv, struct acpi_device *adev)
 	unsigned long cfg;
 	bool skip_acpi_sta_check;
 	struct device *dev = &priv->platform_device->dev;
+	const char *acpi_path;
 
+	acpi_path = get_model_acpi_path(_model, ACPI_PATH_WRITE_RAPIDCHARGE);
 	priv->adev = adev;
-	if (!priv->adev) {
-		dev_info(dev, "Could not get ACPI handle\n");
-		goto err_acpi_init;
-	}
-
+	if (!priv->adev)
+		dev_info(dev, "No ACPI handle, will use FQN paths\n");
 	skip_acpi_sta_check = force || (!priv->conf->acpi_check_dev);
 	if (!skip_acpi_sta_check) {
-		err = eval_int(priv->adev->handle, "_STA", &cfg);
+		acpi_path = get_model_acpi_path(_model, ACPI_PATH_STA);
+		err = eval_int(priv->adev, acpi_path, &cfg);
 		if (err) {
 			dev_info(dev, "Could not evaluate ACPI _STA\n");
 			goto err_acpi_init;
 		}
 
-		err = eval_int(priv->adev->handle, "VPC0._CFG", &cfg);
+		acpi_path = get_model_acpi_path(_model, ACPI_PATH_CFG);
+		err = eval_int(priv->adev, acpi_path, &cfg);
 		if (err) {
 			dev_info(dev, "Could not evaluate ACPI _CFG\n");
 			goto err_acpi_init;
@@ -6166,13 +6541,16 @@ static int legion_add(struct platform_device *pdev)
 		 dmi_sys->ident);
 
 	priv->conf = dmi_sys->driver_data;
-
+	_model = priv->conf;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 0, 0)
 	err = acpi_init(priv, ACPI_COMPANION(&pdev->dev));
 	if (err) {
 		dev_info(&pdev->dev, "Could not init ACPI access: %d\n", err);
 		goto err_acpi_init;
 	}
-
+#else
+	err = acpi_init(priv, NULL);
+#endif
 	// TODO: remove; only used for reverse engineering
 	pr_info("Creating RAM access to embedded controller\n");
 	err = ecram_memoryio_init(&priv->ec_memoryio,
@@ -6350,7 +6728,9 @@ static SIMPLE_DEV_PM_OPS(legion_pm, NULL, legion_pm_resume);
 // same as ideapad
 static const struct acpi_device_id legion_device_ids[] = {
 	// todo: change to "VPC2004", and also ACPI paths
-	{ "PNP0C09", 0 },
+#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 0, 0)
+	    { "PNP0C09", 0 },
+#endif
 	{ "", 0 },
 };
 MODULE_DEVICE_TABLE(acpi, legion_device_ids);
@@ -6365,22 +6745,33 @@ static struct platform_driver legion_driver = {
 	.resume = legion_resume,
 	.driver = {
 		.name   = "legion",
+#if LINUX_VERSION_CODE < KERNEL_VERSION(7, 0, 0) //leave as virtual driver
 		.pm     = &legion_pm,
 		.acpi_match_table = ACPI_PTR(legion_device_ids),
+#endif
 	},
 };
 
 static int __init legion_init(void)
 {
 	int err;
-
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+	static struct platform_device *legion_pdev;
+#endif
 	pr_info("Loading legion_laptop\n");
 	err = platform_driver_register(&legion_driver);
 	if (err) {
 		pr_info("legion_laptop: platform_driver_register failed\n");
 		return err;
 	}
-
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+	legion_pdev = platform_device_register_simple("legion", -1, NULL, 0);
+	if (IS_ERR(legion_pdev)) {
+		pr_err("Failed to allocate virtual legion device\n");
+		platform_driver_unregister(&legion_driver);
+		return PTR_ERR(legion_pdev);
+	}
+#endif
 	return 0;
 }
 
@@ -6389,6 +6780,9 @@ module_init(legion_init);
 static void __exit legion_exit(void)
 {
 	platform_driver_unregister(&legion_driver);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+	platform_device_unregister(_priv.platform_device);
+#endif
 	pr_info("legion_laptop exit\n");
 }
 

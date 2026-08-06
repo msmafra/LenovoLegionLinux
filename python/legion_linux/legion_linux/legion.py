@@ -19,11 +19,14 @@ from PIL import Image
 
 
 log = logging.getLogger(__name__)
-
+kernel_version = tuple(map(int,os.uname().release.split('-')[0].split('.')))
 
 DEFAULT_ENCODING = "utf8"
 DEFAULT_CONFIG_DIR = "/etc/legion_linux"
-LEGION_SYS_BASEPATH = '/sys/module/legion_laptop/drivers/platform:legion/PNP0C09:00'
+if kernel_version >= (7, 0, 0):
+    LEGION_SYS_BASEPATH = '/sys/module/legion_laptop/drivers/platform:legion/legion'
+else:
+    LEGION_SYS_BASEPATH = '/sys/module/legion_laptop/drivers/platform:legion/PNP0C09:00'
 IDEAPAD_SYS_BASEPATH = '/sys/bus/platform/drivers/ideapad_acpi/VPC2004:00'
 LBLDVC_FILE = "/sys/firmware/efi/efivars/LBLDVC-871455d1-5576-4fb8-9865-af0824463c9f"
 LBLDESP_FILE = "/sys/firmware/efi/efivars/LBLDESP-871455d0-5576-4fb8-9865-af0824463b9e"
@@ -490,9 +493,6 @@ class AlwaysOnUSBChargingFeature(BoolFileFeature):
     def __init__(self):
         super().__init__(os.path.join(IDEAPAD_SYS_BASEPATH, 'usb_charging'))
 
-    def set(self, value: str):
-        raise NotImplementedError()
-
 
 class MaximumFanSpeedFeature(BoolFileFeature):
     def __init__(self):
@@ -501,14 +501,16 @@ class MaximumFanSpeedFeature(BoolFileFeature):
 
 class PlatformProfileFeature(FileFeature):
     def __init__(self):
-        super().__init__("/sys/firmware/acpi/platform_profile")
+        super().__init__(
+            LEGION_SYS_BASEPATH + "/platform-profile/platform-profile-[0-9]/profile")
         self.choices = StrFileFeature(
-            "/sys/firmware/acpi/platform_profile_choices")
+            LEGION_SYS_BASEPATH + "/platform-profile/platform-profile-[0-9]/choices")
         self.all_values = [
-            NamedValue("quiet", "Quiet Mode"),
+            NamedValue("low-power", "Low Power"),
             NamedValue("balanced", "Balanced Mode"),
             NamedValue("performance", "Performance Mode"),
-            NamedValue("balanced-performance", "Custom Mode")
+            NamedValue("custom", "Custom Mode"),
+            NamedValue("max-power", "Max Power")
         ]
 
     def get_values(self) -> List[NamedValue]:
@@ -816,10 +818,10 @@ class FanCurveIO(Feature):
         self._write_file(file_path, value)
 
     def set_fan_1_speed_rpm(self, point_id, value):
-        return self.set_fan_1_speed_pwm(point_id, round(value/self.get_fan_1_max_rpm()*255.0))
+        return self.set_fan_1_speed_pwm(point_id, int(value // 100 * (100 * 255) / self.get_fan_1_max_rpm()))
 
     def set_fan_2_speed_rpm(self, point_id, value):
-        return self.set_fan_2_speed_pwm(point_id, round(value/self.get_fan_2_max_rpm()*255.0))
+        return self.set_fan_2_speed_pwm(point_id, int(value // 100 * (100 * 255) / self.get_fan_2_max_rpm()))
 
     def set_lower_cpu_temperature(self, point_id, value):
         point_id = self._validate_point_id(point_id)
@@ -872,10 +874,10 @@ class FanCurveIO(Feature):
         return self._read_file(file_path)
 
     def get_fan_1_speed_rpm(self, point_id):
-        return round(self.get_fan_1_speed_pwm(point_id)/255.0*self.get_fan_1_max_rpm(), ndigits=2)
+        return round(((self.get_fan_1_speed_pwm(point_id) * self.get_fan_1_max_rpm() + (100 * 255) - 1) // (100 * 255)) * 100 , ndigits=2)
 
     def get_fan_2_speed_rpm(self, point_id):
-        return round(self.get_fan_2_speed_pwm(point_id)/255.0*self.get_fan_2_max_rpm(), ndigits=2)
+        return round(((self.get_fan_2_speed_pwm(point_id) * self.get_fan_2_max_rpm()  + (100 * 225) - 1) // (100 * 255)) * 100, ndigits=2)
 
     def get_lower_cpu_temperature(self, point_id):
         point_id = self._validate_point_id(point_id)
@@ -1506,7 +1508,12 @@ class LegionModelFacade:
             return img_width, img_height, img_format
 
     def get_boot_logo_status(self):
-        data = self._read_file(LBLDESP_FILE)
+        try:
+            data = self._read_file(LBLDESP_FILE)
+        except (IOError, OSError) as e:
+            log.warning(f"Could not read LBLDESP_FILE ({LBLDESP_FILE}): {e}")
+            return False, 0, 0
+
         if len(data) < 13:
             log.warning("LBLDESP data is unexpectedly short.")
             return False, 0, 0

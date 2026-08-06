@@ -17,6 +17,7 @@ typedef struct _LEGIOND_CONFIG {
 	command cpu_ac_bp;
 	command cpu_bat_bp;
 	command cpu_ac_p;
+    command cpu_ac_e;
 	command gpu_tdp_ac_q;
 	command gpu_tdp_bat_q;
 	command gpu_tdp_ac_b;
@@ -24,6 +25,7 @@ typedef struct _LEGIOND_CONFIG {
 	command gpu_tdp_ac_bp;
 	command gpu_tdp_bat_bp;
 	command gpu_tdp_ac_p;
+    command gpu_tdp_ac_e;
 } LEGIOND_CONFIG;
 
 int parseconf(LEGIOND_CONFIG *config);

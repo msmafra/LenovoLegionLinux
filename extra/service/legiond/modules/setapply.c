@@ -34,7 +34,10 @@ int set_cpu(POWER_STATE power_state, LEGIOND_CONFIG *config)
 	case P_AC_P:
 		cmd = config->cpu_ac_p;
 		break;
-	default:
+	case P_AC_E:
+		cmd = config->cpu_ac_e;
+		break;
+    default:
 		cmd = NULL;
 		break;
 	}
@@ -85,7 +88,10 @@ int set_fancurve(POWER_STATE power_state, LEGIOND_CONFIG *config)
 	case P_AC_P:
 		strcat(cmd, "performance-ac");
 		break;
-	default:
+	case P_AC_E:
+		strcat(cmd, "extreme-ac");
+		break;
+    default:
 		cmd[0] = '\0';
 		break;
 	}
@@ -140,6 +146,9 @@ int set_gpu(POWER_STATE power_state, LEGIOND_CONFIG *config)
 		break;
 	case P_AC_P:
 		strcat(cmd, config->gpu_tdp_ac_p);
+		break;
+	case P_AC_E:
+		strcat(cmd, config->gpu_tdp_ac_e);
 		break;
 	default:
 		cmd[0] = 0;
